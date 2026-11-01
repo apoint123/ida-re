@@ -21,6 +21,8 @@ description: 使用本机 IDA Pro 9.5 (idalib) 环境进行逆向工程分析。
 ```python
 from ida_session import (
     IDASession,  # 数据库生命周期与原子原语上下文管理器
+    FuncRef,     # func_at / xrefs_with_owner 返回的命名元组
+    OwnedXref,   # xrefs_with_owner 返回的命名元组
     # 原生 IDAPython 模块直通：
     ida_auto,
     ida_bytes,
@@ -51,6 +53,9 @@ from ida_session import (
   - `session.set_comment(target: int | str, comment: str, repeatable: bool = False) -> bool`: 设置注释。
   - `session.xrefs_to(target: int | str, flags: int = 0) -> Iterator[xref]`: 返回指向目标的所有原生交叉引用迭代器；`flags` 透传给 `idautils.XrefsTo`。
   - `session.xrefs_from(target: int | str, flags: int = 0) -> Iterator[xref]`: 返回源自目标的所有原生交叉引用迭代器；`flags` 透传给 `idautils.XrefsFrom`。
+  - `session.func_at(target: int | str) -> FuncRef | None`: 返回地址所属函数；不在任何函数内（如 `.rdata` 数据）时返回 `None`。`FuncRef` 为命名元组 `(start_ea, name, size)`：`size` 由 IDA 原生 `calc_func_size` 系列计算（计入 tail 碎片）。需要 `func_t` 本体（flags、frame、tail 链）时直接调用 `ida_funcs.get_func(ea)`。
+  - `session.names_like(pattern: str | re.Pattern[str]) -> Iterator[tuple[int, str]]`: 按 `re.search` 语义筛选符号名，逐项产出 `(ea, name)`；`"add"` 会命中 `smoke_add`，精确匹配请用 `^...$` 锚定。顺序沿用 IDA 名称表。
+  - `session.xrefs_with_owner(target: int | str, flags: int = 0) -> Iterator[OwnedXref]`: 指向目标的交叉引用与其来源地址所属函数一并产出。`OwnedXref` 为命名元组 `(xref, owner)`：`xref` 是原生 xref 对象，`owner` 为 `FuncRef` 或 `None`（来源位于函数之外，如数据引用）。
   - `session.functions() -> Iterator[int]`: 遍历全库函数入口地址。
   - `session.strings() -> idautils.Strings`: 返回原生 `idautils.Strings` 可迭代对象（元素为 `StringItem`）。
   - `session.min_ea`, `session.max_ea`, `session.proc_name`, `session.hexrays_available`: 数据库元数据属性。
@@ -111,6 +116,19 @@ with IDASession("target.exe.i64") as session:
     target_ea = session.to_ea("target_symbol")
     callers = [hex(x.frm) for x in session.xrefs_to(target_ea)]
     print(json.dumps({"symbol": "target_symbol", "callers": callers}))
+
+    # 3. 引用方宿主函数（名称 + 含 tail 碎片的函数大小）
+    for item in session.xrefs_with_owner(target_ea):
+        owner = item.owner
+        site = owner.name if owner else "<outside any function>"
+        size = owner.size if owner else 0
+        print(hex(item.xref.frm), item.xref.type, site, size)
+
+    # 4. 按正则枚举符号
+    for ea, name in session.names_like(r"^sub_[0-9A-F]+$"):
+        print(hex(ea), name, session.func_at(ea))
 '@ | python -
 }
 ```
+
+这些方法只做「地址 → 结构」的导航：`OwnedXref` 保留未经改动的原生 xref 对象，函数大小取自 IDA 原生计算（含 tail 碎片），不裁剪字段。

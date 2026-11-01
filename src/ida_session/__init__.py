@@ -1,7 +1,9 @@
 """ida_session: Native IDAPython runtime primitives for IDA Pro idalib."""
 
 from ida_session.session import (
+    FuncRef,
     IDASession,
+    OwnedXref,
     ida_auto,
     ida_bytes,
     ida_funcs,
@@ -15,7 +17,9 @@ from ida_session.session import (
 )
 
 __all__ = [
+    "FuncRef",
     "IDASession",
+    "OwnedXref",
     "ida_auto",
     "ida_bytes",
     "ida_funcs",

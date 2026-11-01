@@ -44,6 +44,9 @@ def _assert_closed(session: IDASession, ea: int) -> None:
         lambda: session.min_ea,
         lambda: session.hexrays_available,
         lambda: list(session.xrefs_to(ea)),
+        lambda: session.func_at(ea),
+        lambda: list(session.names_like(".*")),
+        lambda: list(session.xrefs_with_owner(ea)),
     )
     for check in checks:
         try:
@@ -86,6 +89,21 @@ def _test_primitives(exe: Path) -> int:
 
         assert session.proc_name
         assert session.hexrays_available
+
+        owner = session.func_at(add_ea)
+        assert owner is not None
+        assert owner.name == "add"
+        assert owner.start_ea == add_ea
+        assert owner.size > 0
+        assert session.func_at(string_ea) is None
+
+        assert list(session.names_like(r"^add$")) == [(add_ea, "add")]
+        assert dict(session.names_like("comput"))[compute_ea] == "compute"
+        assert not list(session.names_like("__no_such_name_fragment__"))
+
+        owned_xrefs = list(session.xrefs_with_owner(string_ea))
+        assert owned_xrefs, "no owned xref to the fixture string"
+        assert any(o.owner is not None and o.owner.name == "main" for o in owned_xrefs)
 
         assert session.rename(add_ea, "smoke_add")
         assert session.name(add_ea) == "smoke_add"

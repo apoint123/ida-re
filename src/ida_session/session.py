@@ -6,7 +6,7 @@ import contextlib
 import os
 import re
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -28,7 +28,9 @@ import idautils
 import idc
 
 __all__ = [
+    "FuncRef",
     "IDASession",
+    "OwnedXref",
     "ida_auto",
     "ida_bytes",
     "ida_funcs",
@@ -42,6 +44,32 @@ __all__ = [
 ]
 
 _HEX_RE = re.compile(r"(?:0[xX])?[0-9a-fA-F]+")
+
+
+class FuncRef(NamedTuple):
+    """Function owning an address: entry EA, name and total size.
+
+    ``size`` accounts for every fragment (tail chunks included) and is computed by
+    :func:`ida_funcs.calc_func_size_ea` — or :func:`ida_funcs.calc_func_size` on IDA
+    versions before the address-based API. The raw ``func_t`` stays one native call away
+    via :func:`ida_funcs.get_func` when deeper attributes (flags, frame, tails) are needed.
+    """
+
+    start_ea: int
+    name: str
+    size: int
+
+
+class OwnedXref(NamedTuple):
+    """Native xref paired with the function owning its source address.
+
+    ``xref`` is the untouched object yielded by :func:`idautils.XrefsTo`. ``owner`` is
+    ``None`` when ``xref.frm`` lies outside every function (data references, import
+    thunks, and similar).
+    """
+
+    xref: Any
+    owner: FuncRef | None
 
 
 class IDASession:
@@ -225,6 +253,57 @@ class IDASession:
         """
         self._ensure_open()
         return idautils.XrefsFrom(self.to_ea(target), flags)
+
+    def func_at(self, target: int | str) -> FuncRef | None:
+        """Return the function owning an address, or ``None`` when it is outside every one.
+
+        The record carries the function entry, its name and its total size. Raises
+        ValueError when the target does not resolve to a mapped EA.
+        """
+        self._ensure_open()
+        return self._func_ref(self.to_ea(target))
+
+    def names_like(self, pattern: str | re.Pattern[str]) -> Iterator[tuple[int, str]]:
+        """Yield ``(ea, name)`` for every symbol name matched by a regular expression.
+
+        Matching uses :meth:`re.Pattern.search` (substring semantics), so ``"add"`` also
+        matches ``"smoke_add"``; anchor with ``^``/``$`` for exact names. Iteration follows
+        IDA's name list order.
+        """
+        self._ensure_open()
+        rx = re.compile(pattern) if isinstance(pattern, str) else pattern
+        return ((ea, name) for ea, name in idautils.Names() if rx.search(name))
+
+    def xrefs_with_owner(self, target: int | str, flags: int = 0) -> Iterator[OwnedXref]:
+        """Yield every xref to target with the function owning its source address.
+
+        ``flags`` is forwarded to :func:`idautils.XrefsTo`. Each item keeps the untouched
+        native xref and pairs it with a :class:`FuncRef` for ``xref.frm``, or ``None`` for
+        references issued outside any function.
+        """
+        self._ensure_open()
+        return self._iter_owned_xrefs(self.to_ea(target), flags)
+
+    def _iter_owned_xrefs(self, ea: int, flags: int) -> Iterator[OwnedXref]:
+        # The stub types the iterator as a private per-item class; at runtime idautils
+        # copies the native frm/to/iscode/type/user surface onto each yielded object.
+        xrefs = cast(Iterator[Any], idautils.XrefsTo(ea, flags))
+        for xref in xrefs:
+            yield OwnedXref(xref, self._func_ref(xref.frm))
+
+    def _func_ref(self, ea: int) -> FuncRef | None:
+        if hasattr(ida_funcs, "get_func_start"):  # IDA >= 9.4: address-based API
+            start = ida_funcs.get_func_start(ea)
+            if start == ida_idaapi.BADADDR:
+                return None
+            size = ida_funcs.calc_func_size_ea(ea)
+        else:  # legacy pointer-based API
+            func = ida_funcs.get_func(ea)
+            if func is None:
+                return None
+            start = func.start_ea
+            size = ida_funcs.calc_func_size(func)
+        return FuncRef(start, str(ida_funcs.get_func_name(start) or ""), size)
 
     def functions(self) -> Iterator[int]:
         """Return an iterator over function start addresses across the database."""
