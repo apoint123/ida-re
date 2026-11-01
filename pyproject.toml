@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ida-session"
+version = "0.1.0"
+description = "Native IDAPython runtime primitives and lifecycle manager for IDA Pro idalib"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "apoint123" }]
+keywords = ["ida", "idalib", "idapython", "reverse-engineering"]
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = ["idapro"]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.17", "pyright>=1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ida_session = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific
+]
+
+[tool.pyright]
+include = ["src", "tests"]
+# 按本机 IDA 安装路径调整；pyright 不支持在 extraPaths 中展开环境变量。
+extraPaths = ["src", "C:/Program Files/IDA Professional 9.5/python"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
